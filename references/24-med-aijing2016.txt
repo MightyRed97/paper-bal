@@ -1,0 +1,27 @@
+Citation:
+Li Aijing (L Aijing) and Yang Jin (Y Jin). "Design of the Hospital Integrated
+Information Management System Based on Cloud Platform." The West Indian Medical
+Journal, 2016, Vol. 64, No. 5, pp. 521-526. DOI: 10.7727/wimj.2016.057.
+PMID: 27399033; PMCID: PMC4961341.
+
+First author affiliation: The 3rd Xiangya Hospital of Central South University,
+Changsha, Hunan, China; Key Laboratory of Medical Information Research (Central
+South University), College of Hunan Province, Changsha, Hunan, China.
+First author is Chinese: YES.
+
+Access: Open access on PubMed Central, but the PMC/publisher PDF endpoint blocks
+automated download (returns an interstitial HTML page rather than the PDF file).
+URL: https://pmc.ncbi.nlm.nih.gov/articles/PMC4961341/
+PDF (blocked to curl): https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4961341/pdf/wimj-64-0521.pdf
+
+Abstract:
+Hospital information systems in many institutions remain outdated, suffering from
+poor interface design, limited portability and maintainability, weak security, and
+insufficient information-sharing capability across departments. This paper proposes
+a hospital integrated information management system built on a cloud computing
+platform that realizes the optimized integration of hospital information resources,
+improves the level of standardized management, and reduces cost. The cloud-based
+design consolidates fragmented departmental systems, strengthens data security and
+sharing, and provides a scalable and maintainable architecture for hospital
+informatization, offering a reference model for modernizing hospital information
+management.

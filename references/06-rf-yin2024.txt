@@ -1,0 +1,25 @@
+Citation:
+Shuyue Yin. "Random Forest-Based Load Prediction for Cloud Data Centers."
+2024 IEEE 7th International Conference on Information Systems and Computer
+Aided Education (ICISCAE), pp. 945-950, IEEE, 2024.
+DOI: 10.1109/ICISCAE62304.2024.10761488
+
+First author affiliation: Beijing Institute of Technology, Beijing, China
+Chinese first author: Yes
+
+Access: paywalled (IEEE Xplore; no open-access PDF located)
+URL: https://doi.org/10.1109/ICISCAE62304.2024.10761488
+IEEE Xplore: https://ieeexplore.ieee.org/document/10761488
+
+Abstract:
+Because of the growing complexity of data structure and changing workload,
+resource management in data centers remains an important problem. Load
+forecasting is an essential prerequisite for resource management decisions in
+cloud data centers. In this paper, the author proposes an intelligent machine
+learning model for CPU utilization of cloud data centers, which aims to solve
+the problem of resource allocation. A variety of machine learning methods are
+investigated, including Random Forest, Decision Tree, Support Vector
+Regression, Ridge Regression, K Nearest Neighbor, and Principal Component
+Analysis. Experimental comparison shows that the Random Forest model achieves
+the best CPU-utilization prediction accuracy among the evaluated methods and is
+recommended for load prediction in cloud data centers.

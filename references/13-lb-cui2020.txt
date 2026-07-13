@@ -1,0 +1,28 @@
+Citation:
+Jieqi Cui, Pengfei Chen, Guangba Yu. "A Learning-based Dynamic Load Balancing
+Approach for Microservice Systems in Multi-cloud Environment." In 2020 IEEE 26th
+International Conference on Parallel and Distributed Systems (ICPADS), pp. 334-341,
+Hong Kong, December 2020. DOI: 10.1109/ICPADS51040.2020.00052.
+
+First author: Jieqi Cui (Chinese). Affiliation: School of Data and Computer Science,
+Sun Yat-sen University, Guangzhou, China (co-authors Pengfei Chen and Guangba Yu,
+Sun Yat-sen University).
+
+Access: paywalled (IEEE Xplore conference proceedings; no open-access PDF located).
+URL: https://ieeexplore.ieee.org/document/9359175/
+DOI URL: https://doi.org/10.1109/ICPADS51040.2020.00052
+
+Abstract (publisher summary):
+Multi-cloud environments have become common as companies aim to prevent cloud
+vendor lock-in for security and cost concerns, and microservice architecture is often
+adopted for its flexibility. Combining multi-cloud with microservices creates the
+problem of routing requests among all possible microservice instances distributed
+across multiple clouds. This paper presents a learning-based approach to route
+requests in order to balance the load, in which the performance of each microservice
+is modeled explicitly through machine learning models. The model derives response
+time from request volume, routing decisions, and other cloud metrics; a balanced
+routing decision is then obtained by optimizing the model with Bayesian Optimization.
+With this approach, the request routing decision can adapt to dynamic runtime metrics
+instead of remaining static across all circumstances. Experiments show the proposed
+learning-based dynamic load balancing outperforms conventional static strategies in
+terms of response time and load distribution.
