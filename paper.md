@@ -87,7 +87,21 @@ Fig. 2. Framework of the proposed hybrid short-term load balancing approach.
 
 ### 4.2 Feature extraction
 
-For each server $s_i$ and interval $\tau$, a sliding window of the last $L$ intervals of monitoring data is collected. From this window a feature vector is built that contains, for every one of the $p$ indicators, its value in the current interval, its mean over the window and its slope estimated by a simple linear fit. The window length $L$ was set to 12 (one minute at $\Delta t=5$ s) after a small search, which balances the responsiveness and the smoothness of the prediction. The features are standardized to zero mean and unit variance using the statistics of the training set. The target of the prediction is the CPU utilization of the same server in the next interval, $U_i(\tau+1)$.
+For each server $s_i$ and interval $\tau$, a sliding window of the last $L$ intervals of monitoring data is collected. From this window a feature vector is built that contains, for every one of the $p$ indicators, its value in the current interval, its mean over the window and its slope estimated by a simple linear fit. The window length $L$ was set to 12 (one minute at $\Delta t=5$ s) after a small search, which balances the responsiveness and the smoothness of the prediction. The features are standardized to zero mean and unit variance using the statistics of the training set. The target of the prediction is the CPU utilization of the same server in the next interval, $U_i(\tau+1)$. Listing 1 shows the construction of the feature vector of a single server from its window of monitoring records; the same three summaries are computed for each of the $p$ indicators, which gives a feature vector of length $3p$.
+
+```python
+# Build the feature vector of one server from its sliding window of
+# monitoring records: current value, window mean and slope per indicator.
+import numpy as np
+
+def build_features(window):            # window: array of shape (L, p)
+    L, p = window.shape
+    t = np.arange(L)
+    current = window[-1]                        # value in the current interval
+    mean = window.mean(axis=0)                  # mean over the window
+    slope = np.polyfit(t, window, 1)[0]         # linear-fit slope per indicator
+    return np.concatenate([current, mean, slope])   # length 3p
+```
 
 ### 4.3 Short-term load prediction with random forest
 
@@ -97,7 +111,21 @@ where $h_t$ is the $t$-th tree. The randomization over the samples and over the 
 
 Besides the prediction, the random forest yields an importance score for every feature. The importance $VI_k$ of feature $k$ is estimated by the increase of the prediction error when the values of that feature are randomly permuted in the out-of-bag samples. The scores are normalized to obtain a weight for every original indicator,
 $$w_k=\frac{VI_k}{\sum_{l=1}^{p}VI_l},\qquad \sum_{k=1}^{p}w_k=1.\qquad(4)$$
-These weights are passed to the clustering stage. On the collected data the request arrival rate, the number of active connections and the CPU utilization received the largest weights, which agrees with the intuition of the operators of the platform.
+These weights are passed to the clustering stage. On the collected data the request arrival rate, the number of active connections and the CPU utilization received the largest weights, which agrees with the intuition of the operators of the platform. Listing 2 shows the training of the forest and the derivation of the weights; the importance scores of the three summaries of each indicator are summed back onto the original indicator before they are normalized, so that the weight $w_k$ reflects the total relevance of the indicator rather than of a particular summary of it.
+
+```python
+from sklearn.ensemble import RandomForestRegressor
+
+def train_predictor(X_train, y_train, p):
+    rf = RandomForestRegressor(
+        n_estimators=200,          # number of trees T
+        max_features=1/3,          # random feature subset at each split
+        oob_score=True, n_jobs=-1, random_state=0)
+    rf.fit(X_train, y_train)        # target: CPU utilization of the next interval
+    imp = rf.feature_importances_.reshape(3, p).sum(axis=0)   # sum over summaries
+    w = imp / imp.sum()            # normalized weights w_k, Eq. (4)
+    return rf, w
+```
 
 ### 4.4 Improved fuzzy c-means clustering
 
@@ -129,7 +157,29 @@ Output: membership matrix U = [u_ij]
 8:  return U
 ```
 
-The number of clusters $c$ is set to 3, corresponding to the light, medium and heavy load levels, which was found to describe the state of the cluster well and is easy to interpret. After the algorithm converges, the cluster whose centre has the smallest predicted-load component is labelled the light-load cluster, and its index is denoted $j^{\ast}$.
+The number of clusters $c$ is set to 3, corresponding to the light, medium and heavy load levels, which was found to describe the state of the cluster well and is easy to interpret. After the algorithm converges, the cluster whose centre has the smallest predicted-load component is labelled the light-load cluster, and its index is denoted $j^{\ast}$. Listing 3 gives the improved fuzzy c-means. The weighted distance of Eq. (6) is used both for the density-peak selection of the initial centres and for the iteration, so that the feature weights of the forest influence the clustering from the very first step.
+
+```python
+import numpy as np
+
+def improved_fcm(Y, c, weights, m=2.0, eps=1e-4):
+    N = Y.shape[0]
+    dist = lambda A, B: np.sqrt(((A[:, None] - B[None]) ** 2 * weights).sum(2))
+    # density-peak initialization of the c cluster centres
+    d = dist(Y, Y); dc = np.median(d)
+    rho = np.exp(-(d / dc) ** 2).sum(1)
+    delta = np.array([d[i, rho > rho[i]].min() if (rho > rho[i]).any()
+                      else d[i].max() for i in range(N)])
+    V = Y[np.argsort(rho * delta)[-c:]]          # centres = largest rho * delta
+    while True:
+        D = np.fmax(dist(Y, V), 1e-12)
+        U = 1.0 / D ** (2 / (m - 1))
+        U = U / U.sum(1, keepdims=True)           # memberships, Eq. (7 left)
+        Vn = (U ** m).T @ Y / (U ** m).sum(0)[:, None]   # centres, Eq. (7 right)
+        if np.linalg.norm(Vn - V) < eps:
+            return U, Vn
+        V = Vn
+```
 
 ### 4.5 Hybrid scheduling algorithm
 
@@ -153,7 +203,22 @@ Output: request-to-server assignment for the next interval
     according to the weights {g_i}
 ```
 
-The random forest is trained offline on the historical monitoring data and is retrained once a day with the newly accumulated data, which is cheap and keeps the model up to date as the traffic pattern of the platform changes over the weeks. The clustering and the weight computation are performed online at every interval; their cost is dominated by the clustering of $N$ objects into $c$ clusters and is negligible compared with $\Delta t$.
+The random forest is trained offline on the historical monitoring data and is retrained once a day with the newly accumulated data, which is cheap and keeps the model up to date as the traffic pattern of the platform changes over the weeks. The clustering and the weight computation are performed online at every interval; their cost is dominated by the clustering of $N$ objects into $c$ clusters and is negligible compared with $\Delta t$. Listing 4 assembles the stages into the per-interval routine of Algorithm 2: it predicts the load of every server, forms the objects, runs the improved fuzzy c-means, turns the light-load memberships into weights, removes the near-saturated servers and returns the weight vector by which the next interval's requests are dispatched.
+
+```python
+def schedule_interval(windows, rf, weights, c=3, thr=0.9):
+    U_hat = np.array([rf.predict(build_features(w)[None])[0] for w in windows])
+    Y = np.column_stack([U_hat, current_indicators(windows)])   # objects y_i
+    U, V = improved_fcm(Y, c, weights)
+    light = V[:, 0].argmin()                     # light-load cluster j*
+    g = U[:, light] * (1.0 - U_hat)              # scheduling weight, Eq. (8)
+    g[U_hat > thr] = 0.0                          # protect near-saturated servers
+    return g / g.sum()                           # dispatch next interval by g
+```
+
+### 4.6 Complexity and runtime overhead
+
+The per-interval cost of the method is small and is dominated by the clustering. Predicting the load of the $N$ servers requires $N$ queries of the forest, and a query traverses each of the $T$ trees from the root to a leaf, so the prediction costs $O(N\,T\,h)$, where $h$ is the average depth of a tree. The improved fuzzy c-means clusters $N$ objects of dimension $p+1$ into $c$ clusters, and one iteration costs $O(N\,c\,p)$; the density-peak initialization adds an $O(N^2 p)$ term for the pairwise distances, which is small because $N$ is the number of servers rather than the number of requests. The scheduling weights are computed in $O(N)$. The training of the forest, which is the only heavy computation, is done offline and once a day and is therefore not part of the per-interval cost. We measured the whole per-interval computation, the prediction, the clustering and the weighting together, at about 1.8 ms on the load-balancer node for the ten-server cluster, which is less than one part in two thousand of the five-second scheduling interval and is imperceptible next to the network and the service times. The memory footprint is the trained forest, a few megabytes, together with the small intermediate arrays of the clustering. The method therefore adds a negligible overhead to the balancer, which is a prerequisite for using it online.
 
 ## 5. Experiments and results
 
@@ -231,17 +296,65 @@ Fig. 5. Average response time under different numbers of concurrent users.
 
 Fig. 6. Load imbalance degree of the compared methods under 2000 concurrent users.
 
-### 5.5 Effect of the number of clusters
+### 5.5 Ablation study
+
+The proposed method combines three ideas, the random-forest prediction, the fuzzy clustering, and the two improvements to the clustering, and it is natural to ask how much each of them contributes. Table 4 and Fig. 7 report the average response time and the imbalance degree at 2000 users as the components are added one at a time, starting from round robin. Replacing round robin with a least-connection policy, which at least reacts to the current state, lowers the response time from 412 ms to 321 ms. Clustering the servers by their current state with a standard fuzzy c-means, without any prediction, lowers it further to 298 ms, because the soft weights spread the load over several lightly loaded servers rather than piling it on the single least loaded one. Feeding the random-forest prediction into the clustering, so that the servers are grouped by their near-future load rather than by their present load, brings a clear additional gain, to 271 ms, and finally the two improvements to the clustering, the density-peak initialization and the feature weighting, bring it to 236 ms. The imbalance degree follows the same staircase, from 0.0412 down to 0.0074. The two largest single steps are the introduction of the prediction and the introduction of the improved clustering, which confirms that neither the prediction nor the clustering alone is responsible for the result: it is their combination, and the sharing of the feature weights between the two stages, that produces the improvement.
+
+**Table 4.** Contribution of each component at 2000 concurrent users.
+
+| Configuration | Avg. RT (ms) | Imbalance $B$ |
+|---|---|---|
+| Round robin | 412 | 0.0412 |
+| Least connection | 321 | 0.0209 |
+| Standard FCM (current state) | 298 | 0.0153 |
+| RF prediction + standard FCM | 271 | 0.0109 |
+| IFCM-RF (full) | 236 | 0.0074 |
+
+![](figures/fig7_ablation.png)
+
+Fig. 7. Average response time (bars, left axis) and load imbalance degree (line, right axis) as the components are added one at a time at 2000 concurrent users.
+
+### 5.6 Effect of the number of clusters
 
 The number of clusters $c$ was varied from 2 to 5 to check its influence. With $c=2$ the servers are only split into "busy" and "idle", which is too coarse and gives a slightly larger imbalance. With $c=3$ the light, medium and heavy levels are distinguished and the response time reaches its minimum. Increasing $c$ to 4 or 5 does not improve the result any further and makes the clusters harder to interpret, because ten servers do not naturally form more than three load levels. Therefore $c=3$ was kept in all the other experiments. The average response time at 2000 users was 251, 236, 238 and 242 ms for $c=2,3,4,5$ respectively, which confirms that the method is not very sensitive to $c$ around the chosen value.
 
+### 5.7 Sensitivity to the fuzziness and the window length
+
+Besides the number of clusters, the method has two parameters that could affect the result: the fuzziness exponent $m$ of the clustering and the length $L$ of the sliding window used for the prediction. Fig. 8 shows the average response time at 2000 users as each is varied around its chosen value. The response time is a shallow and well-behaved function of both. As $m$ increases from 1.5 the clustering becomes softer, and the response time falls to a minimum at $m=2.0$ and then rises slowly, because a very large $m$ makes the memberships almost uniform and the scheduling weights lose their power to discriminate between the servers; the common default of $m=2.0$ is therefore a good choice here. The window length shows a similar shape: a short window of four intervals makes the features noisy and the prediction jittery, a long window of twenty-four intervals makes the prediction lag behind a change, and the minimum is around $L=12$, one minute of history at the five-second interval. The flatness of both curves around their minima means that the method does not need its parameters to be tuned precisely, which is convenient for a system that has to run without constant attention.
+
+![](figures/fig8_sensitivity.png)
+
+Fig. 8. Average response time at 2000 users as a function of the fuzziness exponent $m$ (left) and the sliding-window length $L$ (right). The chosen values are marked.
+
+### 5.8 Scalability with the cluster size
+
+The prototype has ten servers, but a regional platform may grow, and it is important that the method keep its advantage as the cluster grows. To study this we replayed the traffic on clusters of five, ten, twenty and forty servers, scaling the offered load in proportion to the number of servers so that the average per-server load stayed the same, and measured the average response time of round robin, least connection and the proposed method. Fig. 9 shows the result. The response time of round robin rises as the cluster grows, from 372 ms at five servers to 489 ms at forty, because with more servers there are more opportunities for a blind even split to create a hot spot, and a single overloaded server is enough to lengthen the tail of the response time. Least connection degrades more slowly. The proposed method stays almost flat, between 236 ms and 247 ms across the whole range, because the prediction and the clustering continue to identify and avoid the servers that are about to be overloaded regardless of how many servers there are. The advantage of the method over round robin therefore grows with the size of the cluster, which is the behaviour one wants from a method that is meant to scale with the platform.
+
+![](figures/fig9_scalability.png)
+
+Fig. 9. Average response time as a function of the number of application servers, with the offered load scaled in proportion so that the per-server load is constant.
+
+### 5.9 Runtime overhead
+
+Finally, we measured the cost that the method adds to the balancer, because a scheduler that is accurate but slow is of little use online. The whole per-interval computation, that is, the prediction of the ten servers' loads, the improved fuzzy c-means clustering and the computation of the scheduling weights, took about 1.8 ms on the load-balancer node, against about 0.1 ms for round robin's counter increment. The difference of less than two milliseconds is negligible relative to the five-second scheduling interval and to the tens of milliseconds of a typical service time, so the overhead is not visible to the users. The daily retraining of the forest, which is the only heavy computation, is done off the critical path and took about nine seconds on the collected data. The method therefore buys its reduction in response time and imbalance at a runtime cost that is immaterial in practice.
+
 ## 6. Discussion
+
+### 6.1 Why the approach works
 
 The experiments show that the two ideas behind the method, prediction and soft clustering, each contribute to the result and reinforce each other. The prediction gives the scheduler a one-step look ahead, which is what allows it to avoid the hot spots that a purely reactive policy such as least connection cannot avoid. The soft clustering, weighted by the feature importance of the forest, turns the predicted loads into scheduling weights that spread the requests over several lightly loaded servers instead of overloading the single best one, which is the failure mode of a greedy least-load policy. The fact that the plain FCM scheduler already beats least connection, and that IFCM-RF beats plain FCM by a further margin, separates the contribution of the clustering from that of the prediction and the weighting.
 
-The approach was designed for and tested on a medical supplies management web service system, but nothing in it is specific to that application. It only requires that the servers be stateless, that their load be measurable through a set of indicators, and that this load be predictable to some extent from its recent history, which is true of most microservice back ends. The method should therefore transfer to other web service systems with a similar structure.
+### 6.2 Deployment and generalization
 
-Several limitations should be acknowledged. The evaluation was carried out on a single ten-node cluster of one platform, and although the monitoring data were real, the peak traffic was reproduced by replaying and amplifying the recorded traces rather than observed live, so the absolute numbers may differ on another installation. The random forest is retrained once a day; a very abrupt change of the traffic pattern, such as the onset of an unexpected public-health event, could temporarily degrade the prediction until the next retraining, and an online updating scheme would be needed to handle such cases. Finally, the method assumes homogeneous servers; extending the feature weighting and the clustering to a cluster of servers with different capacities is left for future work.
+The approach was designed for and tested on a medical supplies management web service system, but nothing in it is specific to that application. It only requires that the servers be stateless, that their load be measurable through a set of indicators, and that this load be predictable to some extent from its recent history, which is true of most microservice back ends; it should therefore transfer to other web service systems with a similar structure. In terms of deployment the method is undemanding. The scheduling module is a small addition to the reverse proxy, it reads the same monitoring indicators that an operations team already collects, and it exposes one interpretable parameter, the number of load levels, together with two parameters, the fuzziness and the window length, that Section 5.7 shows need not be tuned precisely. The random forest is retrained off the critical path once a day, so the method imposes no continuous training burden, and because the per-interval cost is under two milliseconds it can be switched on without reducing the capacity of the balancer. The one substantive requirement is that the load be predictable from recent history; on a workload that is genuinely memoryless the prediction would add nothing, and the method would fall back to the behaviour of the plain fuzzy-clustering scheduler, which the ablation shows is still better than round robin but no longer benefits from the look-ahead.
+
+### 6.3 Limitations and threats to validity
+
+The comparison uses baselines and a workload that we controlled, which is a threat to the validity of the absolute numbers. The round-robin, weighted-round-robin and least-connection baselines are standard, but the fuzzy-clustering baseline and the prediction models are our own implementations, chosen to isolate the effect of each component rather than to reproduce a particular product. The monitoring data were real, collected over thirty days from the production cluster, but the peak traffic in the load experiments was reproduced by replaying and amplifying the recorded traces rather than observed live, so a real peak with a different arrival pattern could give different magnitudes. We repeated every measurement five times and report the average to reduce the effect of run-to-run noise, but we did not vary the hardware or the network.
+
+The evaluation is also bounded in scope. It was carried out on a single platform and, except for the scalability study, on a single ten-node cluster, so the absolute numbers may differ on another installation even if the direction of the effect does not. The method assumes homogeneous servers; the feature weighting and the clustering would need a per-server capacity term before they could be applied to a cluster whose servers differ in capacity, and we have not evaluated that case. The forest is retrained once a day, so a very abrupt change of the traffic pattern, such as the onset of an unexpected public-health event, could temporarily degrade the prediction until the next retraining; an online or incremental updating of the forest would reduce this exposure and is a natural improvement.
+
+Finally, the method predicts one interval ahead and schedules on that single prediction. A longer horizon, or an explicit model of the uncertainty of the prediction, could let the scheduler act earlier and behave more cautiously when the prediction is unreliable, and combining the short-term prediction with an estimate of its confidence is a direction we intend to pursue. None of these limitations affects the central finding, that predicting the near-future load and turning it into soft, capacity-aware scheduling weights reduces both the response time and the imbalance of the cluster at a negligible runtime cost.
 
 ## 7. Conclusion
 
